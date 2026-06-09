@@ -45,6 +45,7 @@ SUPABASE_ANON_KEY=<your-supabase-anon-key>
 SUPABASE_SERVICE_ROLE_KEY=<secret>
 
 OPENROUTER_API_KEY=<secret>
+OPENROUTER_MODEL=qwen/qwen3.6-plus-preview
 GOOGLE_API_KEY=<optional-secret>
 
 GITHUB_TOKEN=<secret>

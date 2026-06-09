@@ -20,7 +20,7 @@ class LLMPlanner:
             f"User request: {user_text}"
         )
         payload = {
-            "model": "openrouter/auto",
+            "model": self.config.openrouter_model,
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": 160,
         }

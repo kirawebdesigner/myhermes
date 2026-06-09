@@ -24,6 +24,7 @@ class OperatorConfig:
     supabase_anon_key: str = field(default_factory=lambda: os.getenv("SUPABASE_ANON_KEY", ""))
     supabase_service_role_key: str = field(default_factory=lambda: os.getenv("SUPABASE_SERVICE_ROLE_KEY", ""))
     openrouter_api_key: str = field(default_factory=lambda: os.getenv("OPENROUTER_API_KEY", ""))
+    openrouter_model: str = field(default_factory=lambda: os.getenv("OPENROUTER_MODEL", "openrouter/auto"))
     google_api_key: str = field(default_factory=lambda: os.getenv("GOOGLE_API_KEY", ""))
     github_token: str = field(default_factory=lambda: os.getenv("GITHUB_TOKEN", ""))
     github_username: str = field(default_factory=lambda: os.getenv("GITHUB_USERNAME", "kirawebdesigner"))
