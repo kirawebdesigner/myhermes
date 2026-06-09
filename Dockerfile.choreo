@@ -1,0 +1,24 @@
+FROM python:3.13-slim
+
+ENV PYTHONUNBUFFERED=1
+ENV HERMES_MODE=operator
+ENV API_SERVER_HOST=0.0.0.0
+ENV API_SERVER_PORT=8642
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git ca-certificates curl ripgrep && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY hermes_operator ./hermes_operator
+
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir "fastapi>=0.115,<1" "uvicorn[standard]>=0.34,<1" "httpx>=0.28,<1" "pydantic>=2.10,<3" "graphifyy>=0.1,<1"
+
+RUN useradd -u 10001 -m -d /home/hermes hermes
+USER 10001
+
+EXPOSE 8642
+
+CMD ["python", "-m", "hermes_operator.server"]
