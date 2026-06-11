@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -27,16 +28,38 @@ class ProjectContextEngine:
         recent_tasks = await self._safe_list_rows("tasks", limit=10)
         recent_logs = await self._safe_list_rows("execution_logs", limit=10)
         next_tasks = self._extract_next_tasks(files)
+        repo_cache = await self._repo_cache_for_project(project)
 
         return {
             "project": project,
             "project_slug": project_slug,
             "files": files,
             "graph_summary": graph_summary or {"status": "not_queried", "matched_nodes": [], "matched_edges": []},
+            "repo_cache": repo_cache,
             "recent_tasks": self._filter_project_rows(recent_tasks, project),
             "recent_execution_logs": recent_logs,
             "next_tasks": next_tasks,
         }
+
+    async def _repo_cache_for_project(self, project: str) -> list[dict[str, Any]]:
+        try:
+            tree = await self.memory.github.list_tree(self.memory.memory_repo, prefix="memory/repo_cache/")
+        except Exception:
+            return []
+        project_slug = slugify(project)
+        matches: list[dict[str, Any]] = []
+        for item in tree:
+            path = item.get("path")
+            if not path or not str(path).endswith(".json"):
+                continue
+            try:
+                content = await self.memory.github.get_text_file(self.memory.memory_repo, str(path))
+                data = json.loads(content or "{}")
+            except Exception:
+                continue
+            if project_slug in self._repo_cache_match_text(data):
+                matches.append(data)
+        return matches[:10]
 
     async def _safe_list_rows(self, table: str, *, limit: int) -> list[dict[str, Any]]:
         try:
@@ -65,3 +88,15 @@ class ProjectContextEngine:
             if match:
                 tasks.append(match.group(1).strip())
         return tasks
+
+    @staticmethod
+    def _repo_cache_match_text(data: dict[str, Any]) -> str:
+        values = [
+            str(data.get("name", "")),
+            str(data.get("repo", "")),
+            str(data.get("description", "")),
+            str(data.get("related_goal", "")),
+            " ".join(map(str, data.get("open_tasks", []))),
+            " ".join(map(str, data.get("roadmap", []))),
+        ]
+        return slugify(" ".join(values))

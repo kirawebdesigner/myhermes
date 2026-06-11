@@ -244,6 +244,7 @@ class TelegramAdapter:
             "/next project - recommended next action\n"
             "/projects - list projects\n"
             "/repo index owner/repo - cache repo context\n"
+            "/repo cache [project] - list repo awareness cache\n"
             "/branch owner/repo branch - create safe branch\n"
             "/write owner/repo branch path content - write branch file\n"
             "/draftpr owner/repo branch title - create draft PR\n"
@@ -371,21 +372,37 @@ class TelegramAdapter:
 
     async def _dispatch_repo(self, payload: str) -> str:
         parts = payload.split()
+        if parts and parts[0] == "cache":
+            project = parts[1] if len(parts) > 1 else None
+            result = await self.engine.repo_cache(project=project)
+            if not result["repos"]:
+                return "Repo cache is empty. Use /repo index owner/repo first."
+            lines = []
+            for item in result["repos"][:10]:
+                lines.append(
+                    f"- {item.get('repo')}: {', '.join(item.get('stack') or ['Unknown'])}; "
+                    f"deploy={item.get('deployment') or 'unknown'}"
+                )
+            return f"Repo cache ({result['count']}):\n" + "\n".join(lines)
         if len(parts) < 2 or parts[0] not in {"index", "status", "context"}:
-            return "Use /repo index owner/name, /repo status owner/name, or /repo context owner/name."
+            return "Use /repo index owner/name, /repo status owner/name, /repo context owner/name, or /repo cache [project]."
         mode, repo = parts[0], parts[1]
         cache = mode in {"index", "context"}
         context = await self.engine.repo_context(repo, cache=cache)
         stack = ", ".join(context["stack"])
         next_action = context["next_actions"][0] if context["next_actions"] else "Review repo context."
         memory_line = f"\nCached: {context['memory_path']}" if context.get("memory_path") else ""
+        cache_line = f"\nRepo cache: {context['cache_path']}" if context.get("cache_path") else ""
         return (
             f"Repo {mode}: {context['repo']}\n"
             f"Stack: {stack}\n"
+            f"Deployment: {context.get('deployment') or 'unknown'}\n"
+            f"Related goal: {context.get('related_goal') or 'unknown'}\n"
             f"Files: {context['file_count']}\n"
             f"Important: {', '.join(context['important_files'][:5]) or 'none'}\n"
             f"Next: {next_action}"
             f"{memory_line}"
+            f"{cache_line}"
         )
 
     async def _dispatch_branch(self, payload: str) -> str:

@@ -119,6 +119,24 @@ class GitHubClient:
             return [item for item in files if str(item.get("path", "")).startswith(prefix)]
         return files
 
+    async def latest_commit(self, repo: str, *, ref: str | None = None) -> dict[str, Any] | None:
+        self.safety.require_allowed_repo(repo)
+        params = {"sha": ref, "per_page": "1"} if ref else {"per_page": "1"}
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.get(f"https://api.github.com/repos/{repo}/commits", headers=self.headers, params=params)
+            response.raise_for_status()
+            commits = response.json()
+        if not commits:
+            return None
+        commit = commits[0]
+        return {
+            "sha": str(commit.get("sha", ""))[:12],
+            "message": (commit.get("commit") or {}).get("message", "").splitlines()[0],
+            "author": ((commit.get("commit") or {}).get("author") or {}).get("name"),
+            "date": ((commit.get("commit") or {}).get("author") or {}).get("date"),
+            "html_url": commit.get("html_url"),
+        }
+
     async def get_text_file(self, repo: str, path: str, *, ref: str | None = None) -> str | None:
         data = await self.get_file(repo, path, ref=ref)
         if not data or not data.get("content"):

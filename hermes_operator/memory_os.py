@@ -22,6 +22,7 @@ MEMORY_DIRS = [
     "memory/executions",
     "memory/goals",
     "memory/graphify-out",
+    "memory/repo_cache",
 ]
 
 PROJECT_FILES = {

@@ -267,6 +267,11 @@ async def repo_status(owner: str, name: str) -> dict[str, Any]:
     return await state.engine.repo_context(f"{owner}/{name}", cache=False)
 
 
+@app.get("/operator/repos/cache", dependencies=[Depends(require_api_key)])
+async def repo_cache(project: str | None = None) -> dict[str, Any]:
+    return await state.engine.repo_cache(project=project)
+
+
 @app.post("/operator/projects/{project}/continue", dependencies=[Depends(require_api_key)])
 async def continue_project(project: str) -> dict[str, Any]:
     task = await state.engine.continue_project(project)

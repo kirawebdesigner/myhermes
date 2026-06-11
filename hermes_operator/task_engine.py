@@ -262,6 +262,10 @@ class TaskEngine:
     async def repo_context(self, repo: str, *, ref: str | None = None, cache: bool = True) -> dict[str, Any]:
         return await self.repo_awareness.build_context(repo, ref=ref, cache=cache)
 
+    async def repo_cache(self, project: str | None = None) -> dict[str, Any]:
+        contexts = await self.repo_awareness.cached_contexts(project=project)
+        return {"project": project, "count": len(contexts), "repos": contexts}
+
     def model_status(self) -> dict[str, Any]:
         return self.planner.model_status()
 
@@ -316,6 +320,7 @@ class TaskEngine:
                 "documents": ["pdf", "docx", "pptx", "xlsx", "txt", "md", "csv", "json", "yaml", "toml", "xml", "sql", "source"],
                 "kirzkit_first": True,
                 "graphify_enabled": config.graphify_enabled,
+                "repo_cache": "memory/repo_cache/*.json",
                 "worker_enabled": config.operator_worker_enabled,
             },
             "smoke_tests": [
