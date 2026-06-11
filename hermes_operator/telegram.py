@@ -132,6 +132,12 @@ class TelegramAdapter:
             )
         if text.startswith("/repo "):
             return await self._dispatch_repo(text.removeprefix("/repo ").strip())
+        if text.startswith("/branch "):
+            return await self._dispatch_branch(text.removeprefix("/branch ").strip())
+        if text.startswith("/write "):
+            return await self._dispatch_write(text.removeprefix("/write ").strip())
+        if text.startswith("/draftpr "):
+            return await self._dispatch_draft_pr(text.removeprefix("/draftpr ").strip())
         if text.startswith("/continue "):
             project = text.removeprefix("/continue ").strip()
             task = await self.engine.continue_project(project)
@@ -232,6 +238,9 @@ class TelegramAdapter:
             "/next project - recommended next action\n"
             "/projects - list projects\n"
             "/repo index owner/repo - cache repo context\n"
+            "/branch owner/repo branch - create safe branch\n"
+            "/write owner/repo branch path content - write branch file\n"
+            "/draftpr owner/repo branch title - create draft PR\n"
             "/website brief - KirzKit website plan\n"
             "/kirzkit brief - KirzKit skill plan\n"
             "Send PDF/DOCX/TXT/MD files and I will read + save them."
@@ -255,6 +264,38 @@ class TelegramAdapter:
             f"Next: {next_action}"
             f"{memory_line}"
         )
+
+    async def _dispatch_branch(self, payload: str) -> str:
+        parts = payload.split()
+        if len(parts) != 2:
+            return "Use /branch owner/repo branch-name"
+        repo, branch = parts
+        result = await self.engine.github.create_branch(repo, branch)
+        return f"Branch ready: {repo} {branch} ({result.get('ref', 'ok')})"
+
+    async def _dispatch_write(self, payload: str) -> str:
+        parts = payload.split(maxsplit=3)
+        if len(parts) < 4:
+            return "Use /write owner/repo branch path content"
+        repo, branch, path, content = parts
+        result = await self.engine._github_write_branch_file(
+            repo,
+            branch,
+            path,
+            content,
+            message=f"chore: update {path} from Hermes Operator",
+        )
+        status = "unchanged" if result.get("unchanged") else "written"
+        return f"File {status}: {repo}@{branch}:{path}"
+
+    async def _dispatch_draft_pr(self, payload: str) -> str:
+        parts = payload.split(maxsplit=2)
+        if len(parts) < 3:
+            return "Use /draftpr owner/repo branch title"
+        repo, branch, title = parts
+        result = await self.engine._github_create_draft_pr(repo, branch, title, body="Prepared by Hermes Operator.")
+        url = result.get("html_url") or result.get("url") or "draft PR created"
+        return f"Draft PR: {url}"
 
     async def handle_document(self, document: dict[str, Any], *, caption: str = "") -> str:
         file_id = document.get("file_id")
