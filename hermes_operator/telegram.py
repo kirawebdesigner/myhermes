@@ -222,6 +222,9 @@ class TelegramAdapter:
                 return "No goals found yet."
             return "Goals:\n" + "\n".join(f"- {item.get('title') or item.get('goal') or item.get('id')}" for item in goals[:10])
 
+        natural_reply = await self._dispatch_natural_text(text)
+        if natural_reply:
+            return natural_reply
         return await self.engine.chat_reply(text)
 
     @staticmethod
@@ -243,8 +246,102 @@ class TelegramAdapter:
             "/draftpr owner/repo branch title - create draft PR\n"
             "/website brief - KirzKit website plan\n"
             "/kirzkit brief - KirzKit skill plan\n"
+            "Natural text also works: remember ..., continue Project, build a landing page.\n"
             "Send PDF/DOCX/TXT/MD files and I will read + save them."
         )
+
+    async def _dispatch_natural_text(self, text: str) -> str | None:
+        lower = text.strip().lower()
+        if not lower:
+            return None
+
+        memory_prefixes = (
+            "remember ",
+            "save memory ",
+            "save this memory ",
+            "note ",
+            "capture ",
+        )
+        for prefix in memory_prefixes:
+            if lower.startswith(prefix):
+                value = text[len(prefix) :].strip()
+                if not value:
+                    return None
+                path = await self.engine.save_memory("note", value)
+                return f"I remembered that.\nMemory: {path}"
+
+        continue_prefixes = ("continue ", "resume ")
+        for prefix in continue_prefixes:
+            if lower.startswith(prefix):
+                project = text[len(prefix) :].strip(" .")
+                if not project:
+                    return None
+                task = await self.engine.continue_project(project)
+                return f"Loaded {project} and prepared continuity. Task {task.id} completed."
+
+        next_prefixes = ("next for ", "what next for ", "next action for ")
+        for prefix in next_prefixes:
+            if lower.startswith(prefix):
+                project = text[len(prefix) :].strip(" .?")
+                if not project:
+                    return None
+                result = await self.engine.project_next_action(project)
+                return (
+                    f"Next for {project}\n"
+                    f"Recommended: {result['recommended_next_action']}\n"
+                    f"Open tasks: {len(result['open_tasks'])}\n"
+                    f"Memory matches: {len(result['memory_matches'])}\n"
+                    f"Graph: {result['graph_status']}"
+                )
+
+        task_prefixes = ("create task ", "add task ", "task ")
+        for prefix in task_prefixes:
+            if lower.startswith(prefix):
+                goal = text[len(prefix) :].strip()
+                if not goal:
+                    return None
+                task = await self.engine.create_task(goal)
+                return f"Task queued: {task.id}\nGoal: {task.goal}"
+
+        if lower.startswith(("search memory for ", "find memory ")):
+            query = text.split(" ", 3)[-1].strip()
+            if not query:
+                return None
+            result = await self.engine.search_memory(query)
+            if not result["results"]:
+                return f"No memory matches for '{query}'."
+            return "Memory matches:\n" + "\n".join(
+                f"- {item['path']} (score {item['score']})" for item in result["results"][:5]
+            )
+
+        project_build_terms = ("website", "landing page", "dashboard", "frontend", "ui", "component")
+        build_terms = ("build", "create", "design", "make")
+        if any(term in lower for term in project_build_terms) and any(term in lower for term in build_terms):
+            result = await self.engine.website_plan(text)
+            plan = result["kirzkit_plan"]
+            return (
+                "I created a KirzKit-first build plan.\n"
+                f"Task: {result['task_id']}\n"
+                f"Memory: {result['memory_path']}\n"
+                f"KirzKit skills: {len(plan['recommended_skills'])}\n"
+                f"Workflows: {len(plan['recommended_workflows'])}"
+            )
+
+        if lower in {"status", "are you online", "are you running"}:
+            return "Hermes Operator is running. Choreo is compute; Supabase and GitHub hold state."
+        if lower in {"daily brief", "brief me", "today brief"}:
+            review = await self.engine.daily_review()
+            return (
+                f"Daily Brief\n\n"
+                f"{review['headline']}\n\n"
+                f"Goals: {len(review['goals'])}\n"
+                f"Projects: {len(review['projects'])}\n"
+                f"Queued tasks: {review['tasks']['queued_count']}\n"
+                f"Failed tasks: {review['tasks']['failed_count']}\n"
+                f"Approvals: {len(review['approvals'])}\n\n"
+                f"Focus: {review['suggested_focus']}"
+            )
+        return None
 
     async def _dispatch_repo(self, payload: str) -> str:
         parts = payload.split()
