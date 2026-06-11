@@ -56,10 +56,30 @@ class TelegramAdapter:
         await self.send_message(chat_id, reply)
 
     async def dispatch_text(self, text: str) -> str:
-        if text == "/start":
-            return "Hermes Operator is online. Use /status, /dashboard, /projects, /goals, /memory, /task, /continue, /index, or /worker."
+        if text in {"/start", "/help"}:
+            return self._help_text()
         if text == "/status":
             return "Hermes Operator is running. Choreo is compute; Supabase and GitHub hold state."
+        if text == "/model":
+            status = self.engine.model_status()
+            return (
+                f"Model: {status['configured_model']}\n"
+                f"Provider: {status['provider']}\n"
+                f"Fallbacks: {', '.join(status['candidate_models'])}\n"
+                f"API key: {'set' if status['has_api_key'] else 'missing'}"
+            )
+        if text == "/brief":
+            review = await self.engine.daily_review()
+            return (
+                f"Daily Brief\n\n"
+                f"{review['headline']}\n\n"
+                f"Goals: {len(review['goals'])}\n"
+                f"Projects: {len(review['projects'])}\n"
+                f"Queued tasks: {review['tasks']['queued_count']}\n"
+                f"Failed tasks: {review['tasks']['failed_count']}\n"
+                f"Approvals: {len(review['approvals'])}\n\n"
+                f"Focus: {review['suggested_focus']}"
+            )
         if text == "/dashboard":
             summary = await self.engine.dashboard_summary()
             tasks = summary["tasks"]
@@ -98,6 +118,17 @@ class TelegramAdapter:
             return (
                 f"KirzKit plan: {len(result['recommended_skills'])} skill(s), "
                 f"{len(result['recommended_workflows'])} workflow(s)."
+            )
+        if text.startswith("/website "):
+            brief = text.removeprefix("/website ").strip()
+            result = await self.engine.website_plan(brief)
+            plan = result["kirzkit_plan"]
+            return (
+                f"Website plan created.\n"
+                f"Task: {result['task_id']}\n"
+                f"Memory: {result['memory_path']}\n"
+                f"KirzKit skills: {len(plan['recommended_skills'])}\n"
+                f"Workflows: {len(plan['recommended_workflows'])}"
             )
         if text.startswith("/repo "):
             return await self._dispatch_repo(text.removeprefix("/repo ").strip())
@@ -154,6 +185,16 @@ class TelegramAdapter:
                 f"{project}: {len(status['next_tasks'])} open task(s), "
                 f"graph={status['graph_status']}, files={len(status['files_present'])} present."
             )
+        if text.startswith("/next "):
+            project = text.removeprefix("/next ").strip()
+            result = await self.engine.project_next_action(project)
+            return (
+                f"Next for {project}\n"
+                f"Recommended: {result['recommended_next_action']}\n"
+                f"Open tasks: {len(result['open_tasks'])}\n"
+                f"Memory matches: {len(result['memory_matches'])}\n"
+                f"Graph: {result['graph_status']}"
+            )
         if text == "/approvals":
             approvals = await self.engine.list_pending_approvals()
             if not approvals:
@@ -176,6 +217,25 @@ class TelegramAdapter:
             return "Goals:\n" + "\n".join(f"- {item.get('title') or item.get('goal') or item.get('id')}" for item in goals[:10])
 
         return await self.engine.chat_reply(text)
+
+    @staticmethod
+    def _help_text() -> str:
+        return (
+            "Hermes Operator commands:\n"
+            "/status - health\n"
+            "/brief - daily review\n"
+            "/model - model/fallback status\n"
+            "/memory key=value - save memory\n"
+            "/search query - search memory\n"
+            "/goal goal - create goal plan\n"
+            "/continue project - load project\n"
+            "/next project - recommended next action\n"
+            "/projects - list projects\n"
+            "/repo index owner/repo - cache repo context\n"
+            "/website brief - KirzKit website plan\n"
+            "/kirzkit brief - KirzKit skill plan\n"
+            "Send PDF/DOCX/TXT/MD files and I will read + save them."
+        )
 
     async def _dispatch_repo(self, payload: str) -> str:
         parts = payload.split()

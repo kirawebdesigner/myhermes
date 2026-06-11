@@ -262,6 +262,67 @@ class TaskEngine:
     async def repo_context(self, repo: str, *, ref: str | None = None, cache: bool = True) -> dict[str, Any]:
         return await self.repo_awareness.build_context(repo, ref=ref, cache=cache)
 
+    def model_status(self) -> dict[str, Any]:
+        return self.planner.model_status()
+
+    async def daily_review(self) -> dict[str, Any]:
+        projects = await self.list_projects()
+        goals = await self.list_goals(limit=20)
+        tasks = await self.supabase.list_rows("tasks", limit=100)
+        approvals = await self.list_pending_approvals(limit=20)
+        queued = [task for task in tasks if task.get("status") == "queued"]
+        failed = [task for task in tasks if task.get("status") == "failed"]
+        return {
+            "headline": self._daily_headline(projects, goals, queued, approvals),
+            "goals": goals[:10],
+            "projects": projects[:10],
+            "tasks": {
+                "queued": queued[:10],
+                "failed": failed[:10],
+                "queued_count": len(queued),
+                "failed_count": len(failed),
+            },
+            "approvals": approvals[:10],
+            "suggested_focus": self._suggested_focus(projects, goals, queued, approvals),
+        }
+
+    async def project_next_action(self, project: str) -> dict[str, Any]:
+        graph_summary = await self.query_graph(project)
+        context_packet = await self.build_project_context(project, graph_summary=graph_summary)
+        memory = await self.search_memory(project, limit=5)
+        status = await self.project_status(project)
+        next_tasks = context_packet.get("next_tasks") or status.get("next_tasks") or []
+        recommendation = (
+            next_tasks[0]
+            if next_tasks
+            else f"Create a concrete next task for {project}, then run /task <task> or /kirzkit <build goal>."
+        )
+        return {
+            "project": project,
+            "open_tasks": next_tasks,
+            "recent_tasks": context_packet.get("recent_tasks", [])[:5],
+            "memory_matches": memory.get("results", [])[:5],
+            "graph_status": graph_summary.get("status"),
+            "recommended_next_action": recommendation,
+            "why": "Chosen from project tasks, memory, and graph context.",
+        }
+
+    async def website_plan(self, brief: str, *, project: str | None = None) -> dict[str, Any]:
+        plan = self.plan_with_kirzkit(brief, project=project)
+        task = await self.create_task(f"Build website plan: {brief}", project=project)
+        memory_path = await self.save_memory(
+            "website-plan",
+            (
+                f"Brief: {brief}\n\n"
+                f"Project: {project or 'none'}\n\n"
+                f"Recommended skills: {[item.get('name') for item in plan.get('recommended_skills', [])]}\n"
+                f"Recommended workflows: {[item.get('name') for item in plan.get('recommended_workflows', [])]}\n"
+                f"Implementation sequence: {plan.get('implementation_sequence', [])}\n"
+            ),
+            project=project,
+        )
+        return {"brief": brief, "project": project, "task_id": task.id, "memory_path": memory_path, "kirzkit_plan": plan}
+
     def plan_with_kirzkit(self, goal: str, *, project: str | None = None) -> dict[str, Any]:
         if self.kirzkit_planner is None:
             return {"goal": goal, "project": project, "queries": [], "recommended_workflows": [], "recommended_skills": [], "recommended_agents": [], "implementation_sequence": []}
@@ -562,3 +623,25 @@ class TaskEngine:
         if any(term in lower for term in project_building_terms):
             return goal
         return "project-planner"
+
+    @staticmethod
+    def _daily_headline(projects: list[dict[str, Any]], goals: list[dict[str, Any]], queued: list[dict[str, Any]], approvals: list[dict[str, Any]]) -> str:
+        if approvals:
+            return f"{len(approvals)} approval(s) need your decision."
+        if queued:
+            return f"{len(queued)} queued task(s) are waiting."
+        if goals or projects:
+            return "Projects and goals are ready for the next action."
+        return "Hermes is ready. Create a goal or continue a project."
+
+    @staticmethod
+    def _suggested_focus(projects: list[dict[str, Any]], goals: list[dict[str, Any]], queued: list[dict[str, Any]], approvals: list[dict[str, Any]]) -> str:
+        if approvals:
+            return f"Review approval {approvals[0].get('id')} for {approvals[0].get('skill')}."
+        if queued:
+            return queued[0].get("goal") or "Process the first queued task."
+        if projects:
+            return f"Continue {projects[0].get('name')} and choose one small next action."
+        if goals:
+            return f"Break down goal: {goals[0].get('title') or goals[0].get('goal')}."
+        return "Run /goal Earn first $1k online or /continue BrandBlueprint."

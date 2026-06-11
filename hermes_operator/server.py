@@ -59,6 +59,11 @@ class KirzKitPlanRequest(BaseModel):
     project: str | None = None
 
 
+class WebsitePlanRequest(BaseModel):
+    brief: str
+    project: str | None = None
+
+
 class RepoContextRequest(BaseModel):
     repo: str
     ref: str | None = None
@@ -189,6 +194,7 @@ async def health() -> dict[str, Any]:
         "kirzkit_local_path": state.config.kirzkit_local_path,
         "ruflo_repo": state.config.ruflo_repo,
         "worker_enabled": state.config.operator_worker_enabled,
+        "model": state.engine.model_status(),
     }
 
 
@@ -234,6 +240,16 @@ async def list_goals() -> dict[str, Any]:
 @app.post("/operator/kirzkit/plan", dependencies=[Depends(require_api_key)])
 async def kirzkit_plan(payload: KirzKitPlanRequest) -> dict[str, Any]:
     return state.engine.plan_with_kirzkit(payload.goal, project=payload.project)
+
+
+@app.post("/operator/website/plan", dependencies=[Depends(require_api_key)])
+async def website_plan(payload: WebsitePlanRequest) -> dict[str, Any]:
+    return await state.engine.website_plan(payload.brief, project=payload.project)
+
+
+@app.get("/operator/model", dependencies=[Depends(require_api_key)])
+async def model_status() -> dict[str, Any]:
+    return state.engine.model_status()
 
 
 @app.post("/operator/repos/index", dependencies=[Depends(require_api_key)])
@@ -290,7 +306,18 @@ async def operator_status() -> dict[str, Any]:
         "worker_enabled": state.config.operator_worker_enabled,
         "worker_interval_seconds": state.config.operator_worker_interval_seconds,
         "memory_search_mode": "semantic-hash-with-lexical-fallback",
+        "model": state.engine.model_status(),
     }
+
+
+@app.get("/operator/brief", dependencies=[Depends(require_api_key)])
+async def daily_brief() -> dict[str, Any]:
+    return await state.engine.daily_review()
+
+
+@app.get("/operator/projects/{project}/next", dependencies=[Depends(require_api_key)])
+async def project_next(project: str) -> dict[str, Any]:
+    return await state.engine.project_next_action(project)
 
 
 @app.post("/operator/memory/process", dependencies=[Depends(require_api_key)])

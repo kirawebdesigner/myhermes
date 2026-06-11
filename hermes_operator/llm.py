@@ -83,3 +83,11 @@ class LLMPlanner:
             if model not in deduped:
                 deduped.append(model)
         return deduped
+
+    def model_status(self) -> dict:
+        return {
+            "provider": "openrouter",
+            "configured_model": self.config.openrouter_model,
+            "candidate_models": self._candidate_models(),
+            "has_api_key": bool(self.config.openrouter_api_key),
+        }
