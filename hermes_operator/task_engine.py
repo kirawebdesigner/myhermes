@@ -62,6 +62,9 @@ class TaskEngine:
         await self.memory.save_task_snapshot(task)
         return task
 
+    async def chat_reply(self, message: str) -> str:
+        return await self.planner.chat_reply(message)
+
     async def complete_task(self, task: OperatorTask, result: str) -> OperatorTask:
         task.status = TaskStatus.completed
         task.result = result

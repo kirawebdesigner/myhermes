@@ -167,8 +167,7 @@ class TelegramAdapter:
                 return "No goals found yet."
             return "Goals:\n" + "\n".join(f"- {item.get('title') or item.get('goal') or item.get('id')}" for item in goals[:10])
 
-        task = await self.engine.create_task(text)
-        return f"I captured this as task {task.id}.\nGoal: {task.goal}"
+        return await self.engine.chat_reply(text)
 
     async def poll_forever(self) -> None:
         if not self.config.telegram_bot_token:
