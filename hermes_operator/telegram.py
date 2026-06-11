@@ -68,6 +68,8 @@ class TelegramAdapter:
                 f"Fallbacks: {', '.join(status['candidate_models'])}\n"
                 f"API key: {'set' if status['has_api_key'] else 'missing'}"
             )
+        if text == "/selfcheck":
+            return self._format_self_check(self.engine.self_check())
         if text == "/brief":
             review = await self.engine.daily_review()
             return (
@@ -232,6 +234,7 @@ class TelegramAdapter:
         return (
             "Hermes Operator commands:\n"
             "/status - health\n"
+            "/selfcheck - config + capability smoke test\n"
             "/brief - daily review\n"
             "/model - model/fallback status\n"
             "/memory key=value - save memory\n"
@@ -248,6 +251,27 @@ class TelegramAdapter:
             "/kirzkit brief - KirzKit skill plan\n"
             "Natural text also works: remember ..., continue Project, build a landing page.\n"
             "Send PDF/DOCX/TXT/MD files and I will read + save them."
+        )
+
+    @staticmethod
+    def _format_self_check(check: dict[str, Any]) -> str:
+        model = check["model"]
+        capabilities = check["capabilities"]
+        safety = check["safety"]
+        missing = ", ".join(check["missing"]) if check["missing"] else "none"
+        tests = "\n".join(f"- {item}" for item in check["smoke_tests"][:6])
+        return (
+            "Hermes Self Check\n"
+            f"OK: {check['ok']}\n"
+            f"Missing: {missing}\n"
+            f"Model: {model['configured_model']}\n"
+            f"Memory repo: {check['memory_repo']}\n"
+            f"Allowed repos: {', '.join(check['allowed_repos']) or 'none'}\n"
+            f"Natural actions: {len(capabilities['natural_safe_actions'])}\n"
+            f"Documents: {', '.join(capabilities['documents'][:8])}...\n"
+            f"Delete allowed: {safety['allow_delete']}\n"
+            f"Force push allowed: {safety['allow_force_push']}\n\n"
+            f"Try:\n{tests}"
         )
 
     async def _dispatch_natural_text(self, text: str) -> str | None:
@@ -341,6 +365,8 @@ class TelegramAdapter:
                 f"Approvals: {len(review['approvals'])}\n\n"
                 f"Focus: {review['suggested_focus']}"
             )
+        if lower in {"self check", "selfcheck", "check yourself", "what can you do"}:
+            return self._format_self_check(self.engine.self_check())
         return None
 
     async def _dispatch_repo(self, payload: str) -> str:

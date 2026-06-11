@@ -310,6 +310,11 @@ async def operator_status() -> dict[str, Any]:
     }
 
 
+@app.get("/operator/selfcheck", dependencies=[Depends(require_api_key)])
+async def self_check() -> dict[str, Any]:
+    return state.engine.self_check()
+
+
 @app.get("/operator/brief", dependencies=[Depends(require_api_key)])
 async def daily_brief() -> dict[str, Any]:
     return await state.engine.daily_review()

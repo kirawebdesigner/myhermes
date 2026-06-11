@@ -265,6 +265,71 @@ class TaskEngine:
     def model_status(self) -> dict[str, Any]:
         return self.planner.model_status()
 
+    def self_check(self) -> dict[str, Any]:
+        config = self.github.config
+        missing = config.missing_required()
+        return {
+            "ok": not missing,
+            "missing": missing,
+            "mode": "operator",
+            "memory_repo": config.memory_repo,
+            "allowed_repos": config.allowed_repos,
+            "model": self.model_status(),
+            "telegram": {
+                "enabled": bool(config.telegram_bot_token),
+                "allowed_user_ids": config.telegram_allowed_user_ids,
+            },
+            "safety": {
+                "allow_delete": config.allow_delete,
+                "allow_force_push": config.allow_force_push,
+                "allow_repo_create": config.allow_repo_create,
+                "allow_tier_1_5_auto": config.allow_tier_1_5_auto,
+                "require_confirmation_for_dangerous_actions": config.require_confirmation_for_dangerous_actions,
+            },
+            "capabilities": {
+                "natural_chat": True,
+                "natural_safe_actions": [
+                    "remember ...",
+                    "continue Project",
+                    "next for Project",
+                    "create task ...",
+                    "build landing page ...",
+                    "search memory for ...",
+                ],
+                "telegram_commands": [
+                    "/status",
+                    "/model",
+                    "/brief",
+                    "/dashboard",
+                    "/memory",
+                    "/search",
+                    "/goal",
+                    "/continue",
+                    "/next",
+                    "/repo",
+                    "/branch",
+                    "/write",
+                    "/draftpr",
+                    "/website",
+                    "/worker",
+                ],
+                "documents": ["pdf", "docx", "pptx", "xlsx", "txt", "md", "csv", "json", "yaml", "toml", "xml", "sql", "source"],
+                "kirzkit_first": True,
+                "graphify_enabled": config.graphify_enabled,
+                "worker_enabled": config.operator_worker_enabled,
+            },
+            "smoke_tests": [
+                "hi",
+                "remember KirzKit is my default UI kit",
+                "continue BrandBlueprint",
+                "build a SaaS landing page for BrandBlueprint",
+                "/repo index kirawebdesigner/myhermes",
+                "/branch kirawebdesigner/myhermes hermes/test-phone",
+                "/write kirawebdesigner/myhermes hermes/test-phone README.md hello from Hermes",
+                "/draftpr kirawebdesigner/myhermes hermes/test-phone Hermes test PR",
+            ],
+        }
+
     async def daily_review(self) -> dict[str, Any]:
         projects = await self.list_projects()
         goals = await self.list_goals(limit=20)
