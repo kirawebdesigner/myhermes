@@ -7,6 +7,7 @@ from typing import Any
 
 from hermes_operator.approvals import ApprovalManager
 from hermes_operator.context import ProjectContextEngine
+from hermes_operator.document_ingest import ExtractedDocument, document_memory_body, document_summary
 from hermes_operator.embeddings import SemanticMemoryIndex
 from hermes_operator.execution import ExecutionEngine
 from hermes_operator.goal_planner import GoalPlanner
@@ -20,6 +21,7 @@ from hermes_operator.memory_search import MemorySearchEngine
 from hermes_operator.memory_os import MemoryOS
 from hermes_operator.models import MemoryRecord, OperatorTask, TaskStatus
 from hermes_operator.projects import ProjectRegistry
+from hermes_operator.repo_awareness import RepoAwareness
 from hermes_operator.replay import ReplayStore, json_safe
 from hermes_operator.skill_sources import SkillSourceRegistry
 from hermes_operator.skills import SkillDefinition, SkillRegistry, default_skill_definitions
@@ -43,6 +45,7 @@ class TaskEngine:
         self.graphify = graphify
         self.context = ProjectContextEngine(memory, supabase)
         self.projects = ProjectRegistry(memory, supabase, self.context)
+        self.repo_awareness = RepoAwareness(github, memory, supabase)
         self.memory_pipeline = MemoryPipeline(memory)
         self.memory_search = MemorySearchEngine(memory)
         self.semantic_memory = SemanticMemoryIndex(memory, supabase)
@@ -97,6 +100,19 @@ class TaskEngine:
         )
         await self._index_memory_file_best_effort(path)
         return path
+
+    async def save_document_memory(self, document: ExtractedDocument, *, project: str | None = None) -> dict[str, Any]:
+        key = f"document-{document.filename}"
+        body = document_memory_body(document)
+        path = await self.save_memory(key, body, project=project)
+        return {
+            "ok": document.status == "ok",
+            "status": document.status,
+            "filename": document.filename,
+            "path": path,
+            "summary": document_summary(document),
+            "detail": document.detail,
+        }
 
     async def continue_project(self, project: str) -> OperatorTask:
         await self.memory.ensure_project(project)
@@ -242,6 +258,9 @@ class TaskEngine:
             "recent_executions": len(replays),
             "latest_execution": replays[0] if replays else None,
         }
+
+    async def repo_context(self, repo: str, *, ref: str | None = None, cache: bool = True) -> dict[str, Any]:
+        return await self.repo_awareness.build_context(repo, ref=ref, cache=cache)
 
     def plan_with_kirzkit(self, goal: str, *, project: str | None = None) -> dict[str, Any]:
         if self.kirzkit_planner is None:
@@ -438,6 +457,7 @@ class TaskEngine:
             "memory_search": self._execute_memory_search,
             "goal_plan": self._execute_goal_plan,
             "kirzkit_generate_plan": self._execute_kirzkit_plan,
+            "repo_context": self.repo_context,
             "github_branch_create": self.github.create_branch,
             "github_read_file": self.github.get_text_file,
             "github_write_file": self._github_write_branch_file,

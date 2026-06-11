@@ -59,6 +59,12 @@ class KirzKitPlanRequest(BaseModel):
     project: str | None = None
 
 
+class RepoContextRequest(BaseModel):
+    repo: str
+    ref: str | None = None
+    cache: bool = True
+
+
 class GraphQueryRequest(BaseModel):
     term: str
     limit: int = 20
@@ -228,6 +234,21 @@ async def list_goals() -> dict[str, Any]:
 @app.post("/operator/kirzkit/plan", dependencies=[Depends(require_api_key)])
 async def kirzkit_plan(payload: KirzKitPlanRequest) -> dict[str, Any]:
     return state.engine.plan_with_kirzkit(payload.goal, project=payload.project)
+
+
+@app.post("/operator/repos/index", dependencies=[Depends(require_api_key)])
+async def repo_index(payload: RepoContextRequest) -> dict[str, Any]:
+    return await state.engine.repo_context(payload.repo, ref=payload.ref, cache=True)
+
+
+@app.post("/operator/repos/context", dependencies=[Depends(require_api_key)])
+async def repo_context(payload: RepoContextRequest) -> dict[str, Any]:
+    return await state.engine.repo_context(payload.repo, ref=payload.ref, cache=payload.cache)
+
+
+@app.get("/operator/repos/{owner}/{name}/status", dependencies=[Depends(require_api_key)])
+async def repo_status(owner: str, name: str) -> dict[str, Any]:
+    return await state.engine.repo_context(f"{owner}/{name}", cache=False)
 
 
 @app.post("/operator/projects/{project}/continue", dependencies=[Depends(require_api_key)])

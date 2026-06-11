@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 
 from hermes_operator.config import OperatorConfig
+from hermes_operator.document_ingest import extract_document_text
 from hermes_operator.task_engine import TaskEngine
 
 log = logging.getLogger(__name__)
@@ -41,12 +42,17 @@ class TelegramAdapter:
         chat_id = chat.get("id")
         user_id = user.get("id")
         text = (message.get("text") or "").strip()
-        if not chat_id or not text:
+        if not chat_id:
             return
         if not self.is_allowed(user_id):
             await self.send_message(chat_id, "This Hermes Operator is private.")
             return
-        reply = await self.dispatch_text(text)
+        if message.get("document"):
+            reply = await self.handle_document(message["document"], caption=(message.get("caption") or "").strip())
+        elif text:
+            reply = await self.dispatch_text(text)
+        else:
+            reply = "Send text, a slash command, or a document/PDF for me to read."
         await self.send_message(chat_id, reply)
 
     async def dispatch_text(self, text: str) -> str:
@@ -93,6 +99,8 @@ class TelegramAdapter:
                 f"KirzKit plan: {len(result['recommended_skills'])} skill(s), "
                 f"{len(result['recommended_workflows'])} workflow(s)."
             )
+        if text.startswith("/repo "):
+            return await self._dispatch_repo(text.removeprefix("/repo ").strip())
         if text.startswith("/continue "):
             project = text.removeprefix("/continue ").strip()
             task = await self.engine.continue_project(project)
@@ -168,6 +176,48 @@ class TelegramAdapter:
             return "Goals:\n" + "\n".join(f"- {item.get('title') or item.get('goal') or item.get('id')}" for item in goals[:10])
 
         return await self.engine.chat_reply(text)
+
+    async def _dispatch_repo(self, payload: str) -> str:
+        parts = payload.split()
+        if len(parts) < 2 or parts[0] not in {"index", "status", "context"}:
+            return "Use /repo index owner/name, /repo status owner/name, or /repo context owner/name."
+        mode, repo = parts[0], parts[1]
+        cache = mode in {"index", "context"}
+        context = await self.engine.repo_context(repo, cache=cache)
+        stack = ", ".join(context["stack"])
+        next_action = context["next_actions"][0] if context["next_actions"] else "Review repo context."
+        memory_line = f"\nCached: {context['memory_path']}" if context.get("memory_path") else ""
+        return (
+            f"Repo {mode}: {context['repo']}\n"
+            f"Stack: {stack}\n"
+            f"Files: {context['file_count']}\n"
+            f"Important: {', '.join(context['important_files'][:5]) or 'none'}\n"
+            f"Next: {next_action}"
+            f"{memory_line}"
+        )
+
+    async def handle_document(self, document: dict[str, Any], *, caption: str = "") -> str:
+        file_id = document.get("file_id")
+        filename = document.get("file_name") or "telegram-document"
+        mime_type = document.get("mime_type")
+        if not file_id:
+            return "I could not read that file because Telegram did not send a file id."
+        content = await self._download_file(file_id)
+        extracted = extract_document_text(filename, content, mime_type=mime_type)
+        result = await self.engine.save_document_memory(extracted)
+        caption_line = f"\nCaption: {caption}" if caption else ""
+        if extracted.status != "ok":
+            return f"Document saved, but text extraction is {extracted.status}: {extracted.detail}\nPath: {result['path']}{caption_line}"
+        return f"Document understood and saved: {filename}\nPath: {result['path']}\nSummary: {result['summary']}{caption_line}"
+
+    async def _download_file(self, file_id: str) -> bytes:
+        async with httpx.AsyncClient(timeout=60) as client:
+            file_response = await client.get(f"{self.base_url}/getFile", params={"file_id": file_id})
+            file_response.raise_for_status()
+            file_path = file_response.json()["result"]["file_path"]
+            download_response = await client.get(f"https://api.telegram.org/file/bot{self.config.telegram_bot_token}/{file_path}")
+            download_response.raise_for_status()
+            return download_response.content
 
     async def poll_forever(self) -> None:
         if not self.config.telegram_bot_token:

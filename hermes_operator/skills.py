@@ -90,6 +90,7 @@ def default_skill_definitions() -> list[SkillDefinition]:
         SkillDefinition("memory_search", "Search GitHub-backed memory files.", {"query": "string"}, autonomy_tier=0),
         SkillDefinition("goal_plan", "Create goal, project, and task records.", {"goal": "string"}, autonomy_tier=0),
         SkillDefinition("kirzkit_generate_plan", "Create a KirzKit-first implementation plan.", {"goal": "string"}, autonomy_tier=0),
+        SkillDefinition("repo_context", "Build and cache repository awareness context.", {"repo": "string"}, autonomy_tier=0),
         SkillDefinition("github_branch_create", "Create a working branch in an allowed GitHub repo.", {"repo": "string", "branch": "string"}, risk_level="medium", autonomy_tier=1),
         SkillDefinition("github_read_file", "Read a file from an allowed GitHub repo.", {"repo": "string", "path": "string"}, autonomy_tier=0),
         SkillDefinition("github_write_file", "Write a file to a non-default branch in an allowed GitHub repo.", {"repo": "string", "branch": "string", "path": "string", "content": "string"}, risk_level="medium", autonomy_tier=1),
