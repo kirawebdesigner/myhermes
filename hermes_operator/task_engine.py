@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 from hermes_operator.approvals import ApprovalManager
 from hermes_operator.context import ProjectContextEngine
@@ -600,6 +601,22 @@ class TaskEngine:
             },
         )
         return result
+
+    async def request_ready_pr_approval(self, repo: str, branch: str, title: str, body: str = "") -> dict[str, Any]:
+        step = {
+            "skill": "github_pr_ready",
+            "inputs": {"repo": repo, "branch": branch, "title": title, "body": body},
+            "autonomy_tier": 2,
+            "blocked_reason": "Ready-for-review pull requests require approval.",
+        }
+        approvals = await self.approvals.create_for_blocked_steps(
+            execution_id=f"manual-pr-{uuid4()}",
+            goal=f"Open ready-for-review PR: {title}",
+            project=None,
+            plan=[{"skill": "github_pr_ready", "inputs": step["inputs"]}],
+            steps=[step],
+        )
+        return approvals[0]
 
     def list_skills(self) -> list[SkillDefinition]:
         return self.skill_registry.list()

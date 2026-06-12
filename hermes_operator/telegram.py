@@ -142,8 +142,14 @@ class TelegramAdapter:
             return await self._dispatch_branch(text.removeprefix("/branch ").strip())
         if text.startswith("/write "):
             return await self._dispatch_write(text.removeprefix("/write ").strip())
+        if text.startswith("/edit "):
+            return await self._dispatch_write(text.removeprefix("/edit ").strip())
+        if text.startswith("/commit "):
+            return await self._dispatch_commit(text.removeprefix("/commit ").strip())
         if text.startswith("/draftpr "):
             return await self._dispatch_draft_pr(text.removeprefix("/draftpr ").strip())
+        if text.startswith("/pr "):
+            return await self._dispatch_ready_pr(text.removeprefix("/pr ").strip())
         if text.startswith("/continue "):
             project = text.removeprefix("/continue ").strip()
             task = await self.engine.continue_project(project)
@@ -255,7 +261,10 @@ class TelegramAdapter:
             "/repo cache [project] - list repo awareness cache\n"
             "/branch owner/repo branch - create safe branch\n"
             "/write owner/repo branch path content - write branch file\n"
+            "/edit owner/repo branch path content - edit branch file\n"
+            "/commit owner/repo branch path message :: content - commit branch file\n"
             "/draftpr owner/repo branch title - create draft PR\n"
+            "/pr owner/repo branch title - request ready PR approval\n"
             "/website brief - KirzKit website plan\n"
             "/kirzkit brief - KirzKit skill plan\n"
             "Natural text also works: remember ..., continue Project, build a landing page.\n"
@@ -543,6 +552,21 @@ class TelegramAdapter:
         status = "unchanged" if result.get("unchanged") else "written"
         return f"File {status}: {repo}@{branch}:{path}"
 
+    async def _dispatch_commit(self, payload: str) -> str:
+        parts = payload.split(maxsplit=3)
+        if len(parts) < 4:
+            return "Use /commit owner/repo branch path commit message :: file content"
+        repo, branch, path, remainder = parts
+        if " :: " in remainder:
+            message, content = remainder.split(" :: ", 1)
+            message = message.strip() or f"chore: update {path} from Hermes Operator"
+        else:
+            message = f"chore: update {path} from Hermes Operator"
+            content = remainder
+        result = await self.engine._github_commit_file(repo, branch, path, content, message=message)
+        status = "unchanged" if result.get("unchanged") else "committed"
+        return f"File {status}: {repo}@{branch}:{path}"
+
     async def _dispatch_draft_pr(self, payload: str) -> str:
         parts = payload.split(maxsplit=2)
         if len(parts) < 3:
@@ -551,6 +575,19 @@ class TelegramAdapter:
         result = await self.engine._github_create_draft_pr(repo, branch, title, body="Prepared by Hermes Operator.")
         url = result.get("html_url") or result.get("url") or "draft PR created"
         return f"Draft PR: {url}"
+
+    async def _dispatch_ready_pr(self, payload: str) -> str:
+        parts = payload.split(maxsplit=2)
+        if len(parts) < 3:
+            return "Use /pr owner/repo branch title"
+        repo, branch, title = parts
+        approval = await self.engine.request_ready_pr_approval(
+            repo,
+            branch,
+            title,
+            body="Prepared by Hermes Operator. Ready-for-review requires approval.",
+        )
+        return f"Ready PR approval requested: {approval['id']}\nApprove with /approve {approval['id']}"
 
     async def handle_document(self, document: dict[str, Any], *, caption: str = "") -> str:
         file_id = document.get("file_id")
