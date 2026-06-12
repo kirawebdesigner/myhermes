@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -11,6 +12,7 @@ import httpx
 
 from hermes_operator.config import OperatorConfig
 from hermes_operator.document_ingest import extract_document_text
+from hermes_operator.profile_memory import ProfileMemory
 from hermes_operator.task_engine import TaskEngine
 
 log = logging.getLogger(__name__)
@@ -70,6 +72,8 @@ class TelegramAdapter:
             )
         if text == "/selfcheck":
             return self._format_self_check(self.engine.self_check())
+        if text == "/profile":
+            return self._format_profile(await self.engine.profile_summary())
         if text == "/brief":
             review = await self.engine.daily_review()
             return (
@@ -235,6 +239,7 @@ class TelegramAdapter:
             "Hermes Operator commands:\n"
             "/status - health\n"
             "/selfcheck - config + capability smoke test\n"
+            "/profile - what Hermes knows about you\n"
             "/brief - daily review\n"
             "/model - model/fallback status\n"
             "/memory key=value - save memory\n"
@@ -244,6 +249,9 @@ class TelegramAdapter:
             "/next project - recommended next action\n"
             "/projects - list projects\n"
             "/repo index owner/repo - cache repo context\n"
+            "/repo status owner/repo - repo summary\n"
+            "/repo context owner/repo - repo details\n"
+            "/repo refresh owner/repo - rebuild repo cache\n"
             "/repo cache [project] - list repo awareness cache\n"
             "/branch owner/repo branch - create safe branch\n"
             "/write owner/repo branch path content - write branch file\n"
@@ -253,6 +261,56 @@ class TelegramAdapter:
             "Natural text also works: remember ..., continue Project, build a landing page.\n"
             "Send PDF/DOCX/TXT/MD files and I will read + save them."
         )
+
+    @staticmethod
+    def _identity_text() -> str:
+        return (
+            "I am Hermes, your phone-controlled project operator.\n\n"
+            "I help manage goals, projects, memories, repositories, tasks, and safe GitHub workflows.\n\n"
+            "Current systems:\n"
+            "- Telegram control\n"
+            "- GitHub memory\n"
+            "- Supabase state\n"
+            "- Repository awareness\n"
+            "- KirzKit-first build planning\n\n"
+            "Try:\n"
+            "- continue BrandBlueprint\n"
+            "- what should I work on next\n"
+            "- search memory for SEO\n"
+            "- /repo status kirawebdesigner/myhermes"
+        )
+
+    @staticmethod
+    def _greeting_text() -> str:
+        return (
+            "Hi Kirubel. I am here.\n\n"
+            "You can talk normally or ask me to act:\n"
+            "- remember I am 16\n"
+            "- continue BrandBlueprint\n"
+            "- what do you know about me\n"
+            "- /repo status kirawebdesigner/myhermes"
+        )
+
+    @staticmethod
+    def _format_profile(summary: dict[str, Any]) -> str:
+        profile = summary.get("profile") or {}
+        projects = summary.get("projects") or []
+        goals = summary.get("goals") or []
+        lines = ["What I know about you:"]
+        for key in ["name", "nickname", "age", "school", "location"]:
+            if profile.get(key) is not None:
+                lines.append(f"- {key.replace('_', ' ').title()}: {profile[key]}")
+        if profile.get("note"):
+            lines.append(f"- Note: {profile['note']}")
+        if projects:
+            lines.append("Projects:")
+            lines.extend(f"- {item.get('name')}" for item in projects[:5] if item.get("name"))
+        if goals:
+            lines.append("Goals:")
+            lines.extend(f"- {item.get('title') or item.get('goal') or item.get('id')}" for item in goals[:5])
+        if len(lines) == 1:
+            lines.append("- I do not have profile facts yet. Say: my name is Kirubel, my age is 16.")
+        return "\n".join(lines)
 
     @staticmethod
     def _format_self_check(check: dict[str, Any]) -> str:
@@ -279,6 +337,25 @@ class TelegramAdapter:
         lower = text.strip().lower()
         if not lower:
             return None
+
+        if lower in {"hi", "hello", "hey", "yo", "sup", "hey hermes", "hi hermes"}:
+            return self._greeting_text()
+
+        if lower.rstrip("?") in {"who are you", "what are you", "what can you do", "help me"}:
+            return self._identity_text()
+
+        if lower.rstrip("?") in {"what do you know about me", "who am i", "profile", "show my profile"}:
+            return self._format_profile(await self.engine.profile_summary())
+
+        profile_updates = ProfileMemory.parse_update(text)
+        if profile_updates and (
+            lower.startswith(("update that ", "remember ", "save that "))
+            or re.search(r"\b(?:i am|i'm|im|my age is|age is|turned|my name is|call me|nickname is|i live in|i study at|i go to)\b", lower)
+        ):
+            profile = await self.engine.update_profile(profile_updates)
+            changed = ", ".join(f"{key}={value}" for key, value in profile_updates.items())
+            age_line = f"\nAge: {profile['age']}" if profile.get("age") is not None else ""
+            return f"Got it. I updated your profile: {changed}.{age_line}"
 
         memory_prefixes = (
             "remember ",
@@ -384,23 +461,61 @@ class TelegramAdapter:
                     f"deploy={item.get('deployment') or 'unknown'}"
                 )
             return f"Repo cache ({result['count']}):\n" + "\n".join(lines)
-        if len(parts) < 2 or parts[0] not in {"index", "status", "context"}:
-            return "Use /repo index owner/name, /repo status owner/name, /repo context owner/name, or /repo cache [project]."
+        if len(parts) < 2 or parts[0] not in {"index", "status", "context", "refresh"}:
+            return "Use /repo index owner/name, /repo status owner/name, /repo context owner/name, /repo refresh owner/name, or /repo cache [project]."
         mode, repo = parts[0], parts[1]
-        cache = mode in {"index", "context"}
+        cache = mode in {"index", "context", "refresh"}
         context = await self.engine.repo_context(repo, cache=cache)
+        if mode == "status":
+            return self._format_repo_status(context)
+        if mode in {"context", "index", "refresh"}:
+            return self._format_repo_context(mode, context)
+
+        return self._format_repo_status(context)
+
+    @staticmethod
+    def _format_repo_status(context: dict[str, Any]) -> str:
+        stack = ", ".join(context["stack"])
+        next_action = context["next_actions"][0] if context["next_actions"] else "Review repo context."
+        last_commit = context.get("last_commit") or {}
+        return (
+            f"Repo status: {context['repo']}\n"
+            f"Health: {context.get('repo_health', 'unknown')}/100\n"
+            f"Stack: {stack}\n"
+            f"Deployment: {context.get('deployment') or 'unknown'}\n"
+            f"Deployment status: {context.get('deployment_status') or 'unknown'}\n"
+            f"Dependencies: {', '.join(context.get('dependency_files') or []) or 'none'}\n"
+            f"Issues: {len(context.get('issues') or [])}\n"
+            f"Unfinished tasks: {context.get('unfinished_tasks', len(context.get('open_tasks') or []))}\n"
+            f"Decisions: {len(context.get('decisions') or [])}\n"
+            f"Last commit: {last_commit.get('sha', 'unknown')} {last_commit.get('message', '')}\n"
+            f"Recommended: {context.get('recommended_next_action') or next_action}\n"
+            f"Reason: {context.get('recommendation_reason') or 'Repo cache analysis.'}"
+        )
+
+    @staticmethod
+    def _format_repo_context(mode: str, context: dict[str, Any]) -> str:
         stack = ", ".join(context["stack"])
         next_action = context["next_actions"][0] if context["next_actions"] else "Review repo context."
         memory_line = f"\nCached: {context['memory_path']}" if context.get("memory_path") else ""
         cache_line = f"\nRepo cache: {context['cache_path']}" if context.get("cache_path") else ""
+        dependency_count = sum(len(value) if isinstance(value, list) else len(value.get("dependencies", [])) for value in (context.get("dependencies") or {}).values())
         return (
             f"Repo {mode}: {context['repo']}\n"
             f"Stack: {stack}\n"
+            f"Health: {context.get('repo_health', 'unknown')}/100\n"
             f"Deployment: {context.get('deployment') or 'unknown'}\n"
+            f"Deployment status: {context.get('deployment_status') or 'unknown'}\n"
             f"Related goal: {context.get('related_goal') or 'unknown'}\n"
+            f"Issues: {len(context.get('issues') or [])}\n"
+            f"Recent commits: {len(context.get('recent_commits') or [])}\n"
+            f"Dependencies: {dependency_count}\n"
+            f"Unfinished tasks: {context.get('unfinished_tasks', len(context.get('open_tasks') or []))}\n"
+            f"Decisions: {len(context.get('decisions') or [])}\n"
             f"Files: {context['file_count']}\n"
             f"Important: {', '.join(context['important_files'][:5]) or 'none'}\n"
-            f"Next: {next_action}"
+            f"Recommended: {context.get('recommended_next_action') or next_action}\n"
+            f"Reason: {context.get('recommendation_reason') or 'Repo cache analysis.'}"
             f"{memory_line}"
             f"{cache_line}"
         )

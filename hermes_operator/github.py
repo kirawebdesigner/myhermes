@@ -121,14 +121,42 @@ class GitHubClient:
 
     async def latest_commit(self, repo: str, *, ref: str | None = None) -> dict[str, Any] | None:
         self.safety.require_allowed_repo(repo)
-        params = {"sha": ref, "per_page": "1"} if ref else {"per_page": "1"}
+        commits = await self.recent_commits(repo, ref=ref, limit=1)
+        return commits[0] if commits else None
+
+    async def recent_commits(self, repo: str, *, ref: str | None = None, limit: int = 5) -> list[dict[str, Any]]:
+        self.safety.require_allowed_repo(repo)
+        params = {"sha": ref, "per_page": str(limit)} if ref else {"per_page": str(limit)}
         async with httpx.AsyncClient(timeout=20) as client:
             response = await client.get(f"https://api.github.com/repos/{repo}/commits", headers=self.headers, params=params)
             response.raise_for_status()
             commits = response.json()
-        if not commits:
-            return None
-        commit = commits[0]
+        return [self._commit_summary(commit) for commit in commits]
+
+    async def list_open_issues(self, repo: str, *, limit: int = 20) -> list[dict[str, Any]]:
+        self.safety.require_allowed_repo(repo)
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.get(
+                f"https://api.github.com/repos/{repo}/issues",
+                headers=self.headers,
+                params={"state": "open", "per_page": str(limit)},
+            )
+            response.raise_for_status()
+            issues = response.json()
+        return [
+            {
+                "number": item.get("number"),
+                "title": item.get("title"),
+                "html_url": item.get("html_url"),
+                "labels": [label.get("name") for label in item.get("labels", []) if label.get("name")],
+                "updated_at": item.get("updated_at"),
+            }
+            for item in issues
+            if "pull_request" not in item
+        ]
+
+    @staticmethod
+    def _commit_summary(commit: dict[str, Any]) -> dict[str, Any]:
         return {
             "sha": str(commit.get("sha", ""))[:12],
             "message": (commit.get("commit") or {}).get("message", "").splitlines()[0],

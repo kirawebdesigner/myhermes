@@ -20,6 +20,7 @@ from hermes_operator.memory_pipeline import MemoryPipeline
 from hermes_operator.memory_search import MemorySearchEngine
 from hermes_operator.memory_os import MemoryOS
 from hermes_operator.models import MemoryRecord, OperatorTask, TaskStatus
+from hermes_operator.profile_memory import ProfileMemory
 from hermes_operator.projects import ProjectRegistry
 from hermes_operator.repo_awareness import RepoAwareness
 from hermes_operator.replay import ReplayStore, json_safe
@@ -52,6 +53,7 @@ class TaskEngine:
         self.graph_query = GraphQueryEngine(memory)
         self.skill_sources = skill_sources
         self.goal_planner = GoalPlanner(supabase, memory)
+        self.profile = ProfileMemory(memory)
         self.kirzkit_planner = KirzKitPlanner(skill_sources) if skill_sources is not None else None
         self.replay_store = ReplayStore(memory)
         self.approvals = ApprovalManager(supabase)
@@ -67,6 +69,30 @@ class TaskEngine:
 
     async def chat_reply(self, message: str) -> str:
         return await self.planner.chat_reply(message)
+
+    async def update_profile(self, updates: dict[str, Any]) -> dict[str, Any]:
+        profile = await self.profile.update(updates)
+        await self.supabase.insert(
+            "memories",
+            {
+                "key": "profile",
+                "value": str(updates),
+                "project": None,
+                "source": "profile",
+                "metadata": {"github_path": "memory/profile.json"},
+            },
+        )
+        return profile
+
+    async def profile_summary(self) -> dict[str, Any]:
+        profile = await self.profile.get()
+        projects = await self.list_projects()
+        goals = await self.list_goals(limit=5)
+        return {
+            "profile": profile,
+            "projects": projects[:10],
+            "goals": goals[:5],
+        }
 
     async def complete_task(self, task: OperatorTask, result: str) -> OperatorTask:
         task.status = TaskStatus.completed
@@ -362,19 +388,26 @@ class TaskEngine:
         memory = await self.search_memory(project, limit=5)
         status = await self.project_status(project)
         next_tasks = context_packet.get("next_tasks") or status.get("next_tasks") or []
+        repo_tasks = self._repo_cache_tasks(context_packet.get("repo_cache") or [])
+        repo_recommendations = self._repo_cache_recommendations(context_packet.get("repo_cache") or [])
+        combined_tasks = [*next_tasks, *repo_tasks]
         recommendation = (
-            next_tasks[0]
-            if next_tasks
+            repo_recommendations[0]
+            if repo_recommendations
+            else
+            combined_tasks[0]
+            if combined_tasks
             else f"Create a concrete next task for {project}, then run /task <task> or /kirzkit <build goal>."
         )
         return {
             "project": project,
-            "open_tasks": next_tasks,
+            "open_tasks": combined_tasks,
             "recent_tasks": context_packet.get("recent_tasks", [])[:5],
             "memory_matches": memory.get("results", [])[:5],
+            "repo_cache": context_packet.get("repo_cache", [])[:5],
             "graph_status": graph_summary.get("status"),
             "recommended_next_action": recommendation,
-            "why": "Chosen from project tasks, memory, and graph context.",
+            "why": "Chosen from repo cache, project tasks, memory, and graph context.",
         }
 
     async def website_plan(self, brief: str, *, project: str | None = None) -> dict[str, Any]:
@@ -613,6 +646,25 @@ class TaskEngine:
         if self.skill_sources is None:
             return []
         return self.skill_sources.search(query)
+
+    @staticmethod
+    def _repo_cache_tasks(repo_cache: list[dict[str, Any]]) -> list[str]:
+        tasks: list[str] = []
+        for repo in repo_cache:
+            repo_name = repo.get("repo") or repo.get("name") or "repo"
+            for task in repo.get("open_tasks") or repo.get("tasks") or []:
+                tasks.append(f"{repo_name}: {task}")
+        return tasks[:20]
+
+    @staticmethod
+    def _repo_cache_recommendations(repo_cache: list[dict[str, Any]]) -> list[str]:
+        recommendations: list[str] = []
+        for repo in repo_cache:
+            action = repo.get("recommended_next_action")
+            if action:
+                repo_name = repo.get("repo") or repo.get("name") or "repo"
+                recommendations.append(f"{repo_name}: {action}")
+        return recommendations[:10]
 
     async def _execute_memory_search(self, query: str, limit: int = 10) -> dict[str, Any]:
         return await self.search_memory(query, limit=limit)

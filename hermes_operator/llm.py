@@ -39,7 +39,11 @@ class LLMPlanner:
                 {"role": "user", "content": user_text},
             ],
             max_tokens=320,
-            fallback="I am online. What do you want to work on? Use /memory, /task, /continue, /goal, or /projects when you want me to take action.",
+            fallback=(
+                "The AI model is temporarily unavailable, but Hermes core systems are online.\n\n"
+                "You can still use memory, projects, goals, repository cache, and GitHub-safe commands.\n"
+                "Try /model, /selfcheck, /memory, /continue, /repo status, or /projects."
+            ),
         )
 
     async def _complete(self, messages: list[dict[str, str]], *, max_tokens: int, fallback: str) -> str:

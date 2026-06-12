@@ -262,6 +262,11 @@ async def repo_context(payload: RepoContextRequest) -> dict[str, Any]:
     return await state.engine.repo_context(payload.repo, ref=payload.ref, cache=payload.cache)
 
 
+@app.post("/operator/repos/refresh", dependencies=[Depends(require_api_key)])
+async def repo_refresh(payload: RepoContextRequest) -> dict[str, Any]:
+    return await state.engine.repo_context(payload.repo, ref=payload.ref, cache=True)
+
+
 @app.get("/operator/repos/{owner}/{name}/status", dependencies=[Depends(require_api_key)])
 async def repo_status(owner: str, name: str) -> dict[str, Any]:
     return await state.engine.repo_context(f"{owner}/{name}", cache=False)
