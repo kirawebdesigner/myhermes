@@ -141,6 +141,34 @@ class TaskEngine:
             "detail": document.detail,
         }
 
+    async def record_decision(
+        self,
+        *,
+        title: str,
+        rationale: str,
+        project: str | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        path = await self.memory.save_decision(title=title, rationale=rationale, project=project, metadata=metadata)
+        row = await self.supabase.insert(
+            "decisions",
+            {
+                "project": project,
+                "title": title,
+                "rationale": rationale,
+                "metadata": {"github_path": path, **(metadata or {})},
+            },
+        )
+        await self._index_memory_file_best_effort(path)
+        return {"path": path, "decision": row}
+
+    async def list_decisions(self, *, project: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+        rows = await self.supabase.list_rows("decisions", limit=limit)
+        if project:
+            project_lower = project.lower()
+            rows = [row for row in rows if str(row.get("project") or "").lower() == project_lower]
+        return rows
+
     async def continue_project(self, project: str) -> OperatorTask:
         await self.memory.ensure_project(project)
         graph_summary = await self.query_graph(project)

@@ -103,6 +103,17 @@ class TelegramAdapter:
                 key, value = "note", payload
             path = await self.engine.save_memory(key.strip(), value.strip())
             return f"Memory saved to {path}."
+        if text.startswith("/decision "):
+            return await self._dispatch_decision(text.removeprefix("/decision ").strip())
+        if text.startswith("/decisions"):
+            project = text.removeprefix("/decisions").strip() or None
+            decisions = await self.engine.list_decisions(project=project)
+            if not decisions:
+                return f"No decisions found{f' for {project}' if project else ''}."
+            return "Decisions:\n" + "\n".join(
+                f"- {item.get('project') or 'general'}: {item.get('title')} - {item.get('rationale')}"
+                for item in decisions[:10]
+            )
         if text.startswith("/search "):
             query = text.removeprefix("/search ").strip()
             result = await self.engine.search_memory(query)
@@ -249,6 +260,8 @@ class TelegramAdapter:
             "/brief - daily review\n"
             "/model - model/fallback status\n"
             "/memory key=value - save memory\n"
+            "/decision project | title | reason - save a decision\n"
+            "/decisions [project] - list decisions\n"
             "/search query - search memory\n"
             "/goal goal - create goal plan\n"
             "/continue project - load project\n"
@@ -380,6 +393,9 @@ class TelegramAdapter:
                     return None
                 path = await self.engine.save_memory("note", value)
                 return f"I remembered that.\nMemory: {path}"
+
+        if lower.startswith("decision:"):
+            return await self._dispatch_decision(text.split(":", 1)[1].strip())
 
         continue_prefixes = ("continue ", "resume ")
         for prefix in continue_prefixes:
@@ -551,6 +567,14 @@ class TelegramAdapter:
         )
         status = "unchanged" if result.get("unchanged") else "written"
         return f"File {status}: {repo}@{branch}:{path}"
+
+    async def _dispatch_decision(self, payload: str) -> str:
+        parts = [part.strip() for part in payload.split("|", 2)]
+        if len(parts) < 3 or not all(parts):
+            return "Use /decision project | title | reason"
+        project, title, rationale = parts
+        result = await self.engine.record_decision(project=project, title=title, rationale=rationale)
+        return f"Decision saved: {title}\nPath: {result['path']}"
 
     async def _dispatch_commit(self, payload: str) -> str:
         parts = payload.split(maxsplit=3)

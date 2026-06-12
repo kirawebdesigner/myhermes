@@ -9,7 +9,7 @@ from typing import Any
 
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from hermes_operator.config import OperatorConfig, load_config
 from hermes_operator.github import GitHubClient
@@ -36,6 +36,13 @@ class MemoryRequest(BaseModel):
     key: str
     value: str
     project: str | None = None
+
+
+class DecisionRequest(BaseModel):
+    title: str
+    rationale: str
+    project: str | None = None
+    metadata: dict[str, str] = Field(default_factory=dict)
 
 
 class MemorySearchRequest(BaseModel):
@@ -214,6 +221,22 @@ async def create_task(payload: TaskRequest) -> dict[str, Any]:
 async def save_memory(payload: MemoryRequest) -> dict[str, Any]:
     path = await state.engine.save_memory(payload.key, payload.value, project=payload.project)
     return {"ok": True, "path": path}
+
+
+@app.post("/operator/decisions", dependencies=[Depends(require_api_key)])
+async def create_decision(payload: DecisionRequest) -> dict[str, Any]:
+    return await state.engine.record_decision(
+        title=payload.title,
+        rationale=payload.rationale,
+        project=payload.project,
+        metadata=payload.metadata,
+    )
+
+
+@app.get("/operator/decisions", dependencies=[Depends(require_api_key)])
+async def list_decisions(project: str | None = None, limit: int = 20) -> dict[str, Any]:
+    decisions = await state.engine.list_decisions(project=project, limit=limit)
+    return {"project": project, "count": len(decisions), "decisions": decisions}
 
 
 @app.post("/operator/memory/search", dependencies=[Depends(require_api_key)])

@@ -123,6 +123,37 @@ class MemoryOS:
         )
         return path
 
+    async def save_decision(
+        self,
+        *,
+        title: str,
+        rationale: str,
+        project: str | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> str:
+        now = datetime.now(timezone.utc)
+        project_slug = slugify(project or "general")
+        path = f"memory/decisions/{project_slug}/{now.strftime('%Y%m%d%H%M%S')}-{slugify(title)}.md"
+        meta = metadata or {}
+        meta_lines = "\n".join(f"- {key}: {value}" for key, value in sorted(meta.items()) if value)
+        metadata_section = f"\n## Metadata\n\n{meta_lines}\n" if meta_lines else ""
+        content = (
+            f"# {title}\n\n"
+            f"Date: {now.date().isoformat()}\n"
+            f"Project: {project or 'general'}\n\n"
+            f"## Decision\n\n{title}\n\n"
+            f"## Reason\n\n{rationale}\n"
+            f"{metadata_section}"
+        )
+        await self.github.put_file(
+            self.memory_repo,
+            path,
+            content,
+            f"chore(memory): record decision {slugify(title)}",
+            enforce_allowlist=False,
+        )
+        return path
+
     async def memory_file_paths(self) -> list[str]:
         files = await self.github.list_tree(self.memory_repo, prefix="memory/")
         return [
